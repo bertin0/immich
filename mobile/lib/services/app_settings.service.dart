@@ -4,6 +4,8 @@ import 'package:immich_mobile/entities/store.entity.dart';
 enum AppSettingsEnum<T> {
   advancedTroubleshooting<bool>(StoreKey.advancedTroubleshooting, null, false),
   manageLocalMediaAndroid<bool>(StoreKey.manageLocalMediaAndroid, null, false),
+  filmstripEnabled<bool>(StoreKey.filmstripEnabled, "filmstripEnabled", true),
+  filmstripHeight<int>(StoreKey.filmstripHeight, "filmstripHeight", 60),
   enableHapticFeedback<bool>(StoreKey.enableHapticFeedback, null, true),
   readonlyModeEnabled<bool>(StoreKey.readonlyModeEnabled, "readonlyModeEnabled", false);
 

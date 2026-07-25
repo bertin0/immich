@@ -20,10 +20,12 @@ import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_preloader.
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_stack.provider.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/viewer_bottom_app_bar.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/viewer_top_app_bar.widget.dart';
+import 'package:immich_mobile/providers/app_settings.provider.dart';
 import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
 import 'package:immich_mobile/providers/cast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/current_album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
+import 'package:immich_mobile/services/app_settings.service.dart';
 import 'package:immich_mobile/utils/system_ui.utils.dart';
 import 'package:immich_mobile/widgets/photo_view/photo_view.dart';
 
@@ -68,13 +70,15 @@ class AssetViewer extends ConsumerStatefulWidget {
   /// Sets the asset and thumbnail size before opening the viewer.
   static void setAsset(WidgetRef ref, BaseAsset asset, {Size? thumbnailSize}) {
     ref.read(assetViewerProvider.notifier).reset();
+    ref.read(assetViewerProvider.notifier).setAsset(asset, thumbnailSize: thumbnailSize);
 
-    // Hide controls by default for videos
-    if (asset.isVideo) {
+    // Hide controls by default for videos, but when the filmstrip is active
+    // let the VideoControls auto-hide timer handle it so controls aren't
+    // abruptly hidden.
+    final filmstripEnabled = ref.read(appSettingsServiceProvider).getSetting<bool>(AppSettingsEnum.filmstripEnabled);
+    if (asset.isVideo && !filmstripEnabled) {
       ref.read(assetViewerProvider.notifier).setControls(false);
     }
-
-    ref.read(assetViewerProvider.notifier).setAsset(asset, thumbnailSize: thumbnailSize);
   }
 }
 
@@ -86,31 +90,45 @@ class _AssetViewerState extends ConsumerState<AssetViewer> {
   );
 
   late final _heroOffset = widget.heroOffset ?? TabsRouterScope.of(context)?.controller.activeIndex ?? 0;
-  late final _pageController = PageController(initialPage: widget.initialIndex);
+  late final _initialIndex = widget.initialIndex;
+  late final _pageController = PageController(initialPage: _initialIndex);
   late final _preloader = AssetPreloader(timelineService: ref.read(timelineServiceProvider), mounted: () => mounted);
 
-  late int _currentPage = widget.initialIndex;
+  late int _currentPage = _initialIndex;
   late int _totalAssets = ref.read(timelineServiceProvider).totalAssets;
+
+  void _setCurrentPage(int v) {
+    _currentPage = v;
+    ref.read(assetViewerProvider.notifier).setCurrentIndex(v);
+  }
 
   StreamSubscription? _reloadSubscription;
   KeepAliveLink? _stackChildrenKeepAlive;
+
+  void _navigateTo(int index) {
+    final maxPage = _totalAssets - 1;
+    if (index < 0 || index > maxPage) {
+      return;
+    }
+    _setCurrentPage(index);
+    _pageController.jumpToPage(index);
+    unawaited(_onAssetChanged(index));
+  }
 
   void _onTapNavigate(int direction) {
     final page = _pageController.page?.toInt();
     if (page == null) {
       return;
     }
-    final target = page + direction;
-    final maxPage = _totalAssets - 1;
-    if (target >= 0 && target <= maxPage) {
-      _pageController.jumpToPage(target);
-      unawaited(_onAssetChanged(target));
-    }
+    _navigateTo(page + direction);
   }
 
   @override
   void initState() {
     super.initState();
+
+    // Seed the provider so filmstrip/external listeners see the initial index.
+    ref.read(assetViewerProvider.notifier).setCurrentIndex(_initialIndex);
 
     final asset = ref.read(assetViewerProvider).currentAsset;
     assert(asset != null, "Current asset should not be null when opening the AssetViewer");
@@ -154,6 +172,7 @@ class _AssetViewerState extends ConsumerState<AssetViewer> {
 
     final page = _pageController.page?.round();
     if (page != null && page != _currentPage) {
+      _setCurrentPage(page);
       unawaited(_onAssetChanged(page));
     }
     return false;
@@ -161,7 +180,7 @@ class _AssetViewerState extends ConsumerState<AssetViewer> {
 
   void _onAssetInit(Duration timeStamp) {
     _preloader.preload(
-      widget.initialIndex,
+      _initialIndex,
       context.sizeData,
       thumbnailSize: ref.read(assetViewerProvider).thumbnailSize,
     );
@@ -169,7 +188,7 @@ class _AssetViewerState extends ConsumerState<AssetViewer> {
   }
 
   Future<void> _onAssetChanged(int index) async {
-    _currentPage = index;
+    _setCurrentPage(index);
 
     final asset = await ref.read(timelineServiceProvider).getAssetAsync(index);
     if (asset == null) {
@@ -326,6 +345,16 @@ class _AssetViewerState extends ConsumerState<AssetViewer> {
     ref.listen(assetViewerProvider.select((value) => (value.showingControls, value.showingDetails)), (_, state) {
       final (controls, details) = state;
       unawaited(_setSystemUIMode(controls, details));
+    });
+
+    // React to external navigation requests (e.g. from the filmstrip).
+    // Internal changes (page swipe, tap-navigate) update _currentPage first
+    // through _setCurrentPage, so the guard prevents a redundant update.
+    ref.listen(assetViewerProvider.select((s) => s.currentIndex), (_, idx) {
+      if (idx == _currentPage) {
+        return;
+      }
+      _navigateTo(idx);
     });
 
     return AnnotatedRegion(
