@@ -19,6 +19,10 @@ enum StoreKey<T> {
   // Read-only Mode settings
   readonlyModeEnabled<bool>._(138),
 
+  // Filmstrip navigation
+  filmstripEnabled<bool>._(142),
+  filmstripHeight<int>._(143),
+
   syncMigrationStatus<String>._(1013),
 
   // Legacy keys that have been migrated to the new metadata store
