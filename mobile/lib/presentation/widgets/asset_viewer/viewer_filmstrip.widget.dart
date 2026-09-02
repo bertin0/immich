@@ -3,7 +3,9 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/domain/models/events.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
+import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/presentation/widgets/images/thumbnail.widget.dart';
 import 'package:immich_mobile/providers/app_settings.provider.dart';
 import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
@@ -48,6 +50,9 @@ class _ViewerFilmstripState extends ConsumerState<ViewerFilmstrip> {
   /// Tracks whether the user is currently having their finger on the filmstrip.
   bool _isPointerDown = false;
 
+  /// Keeps the strip in sync when assets are added/removed (e.g. a delete).
+  StreamSubscription<Event>? _reloadSubscription;
+
   void _applyHeight(double height) {
     _filmstripHeight = height;
     _itemExtent = height - 4;
@@ -61,6 +66,7 @@ class _ViewerFilmstripState extends ConsumerState<ViewerFilmstrip> {
     _scrollController = ScrollController();
     _scrollController.addListener(_onScrollPositionChanged);
     _timelineService = ref.read(timelineServiceProvider);
+    _reloadSubscription = EventStream.shared.listen(_onEvent);
     final initialIndex = ref.read(assetViewerProvider).currentIndex;
     _currentIndex = ValueNotifier(initialIndex);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -79,6 +85,7 @@ class _ViewerFilmstripState extends ConsumerState<ViewerFilmstrip> {
       _scrollController.position.isScrollingNotifier.removeListener(_onScrollingChanged);
     }
     _scrollController.removeListener(_onScrollPositionChanged);
+    unawaited(_reloadSubscription?.cancel());
     _scrollController.dispose();
     _currentIndex.dispose();
     super.dispose();
@@ -134,6 +141,32 @@ class _ViewerFilmstripState extends ConsumerState<ViewerFilmstrip> {
       }
 
       _loadTask = null;
+    });
+  }
+
+  /// The timeline changed (asset deleted, added, ...). Rebuild so the strip drops
+  /// stale thumbnails and picks up the new total.
+  void _onEvent(Event event) {
+    if (event is! TimelineReloadEvent || !mounted) {
+      return;
+    }
+
+    final total = _timelineService.totalAssets;
+    if (total == 0) {
+      return;
+    }
+
+    // The removed asset may have sat at or before the current index.
+    _currentIndex.value = _currentIndex.value.clamp(0, total - 1);
+
+    setState(() {});
+    unawaited(_ensureLoaded());
+
+    // Item count shrank; re-centre once the new extents are laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _scrollToCurrentIndex(animated: false);
+      }
     });
   }
 
