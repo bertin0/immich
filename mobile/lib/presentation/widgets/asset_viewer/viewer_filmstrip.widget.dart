@@ -7,6 +7,7 @@ import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/presentation/widgets/images/thumbnail.widget.dart';
 import 'package:immich_mobile/providers/app_settings.provider.dart';
 import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
+import 'package:immich_mobile/providers/haptic_feedback.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/services/app_settings.service.dart';
 
@@ -241,6 +242,7 @@ class _ViewerFilmstripState extends ConsumerState<ViewerFilmstrip> {
     // Set internal _currentIndex before updating the one in provider
     // as we don't want the provider listener to trigger a scrollToIndex while dragging.
     _currentIndex.value = idx;
+    ref.read(hapticFeedbackProvider.notifier).lightImpact();
     unawaited(_ensureLoaded());
     ref.read(assetViewerProvider.notifier).setCurrentIndex(idx);
   }
